@@ -18,10 +18,10 @@ usb.backend.libusb1.get_backend(find_library=lambda x: dll_path)
 from pyAgxArm import create_agx_arm_config, AgxArmFactory, ArmModel
 
 # ── EMQX broker ───────────────────────────────────────────────────────────────
-BROKER_HOST = "c22d3035.ala.us-east-1.emqxsl.com"
+BROKER_HOST = "m"
 BROKER_PORT = 8084
-MQTT_USER   = "Botler"
-MQTT_PASS   = "Botler"
+MQTT_USER   = " "
+MQTT_PASS   = " "
 
 TOPICS = [
     ("robot/drive",   0),
