@@ -1,0 +1,119 @@
+import ctypes
+import logging
+import time
+import math
+
+logging.getLogger('usb').setLevel(logging.WARNING)
+
+dll_path = r"C:\Users\pv\robot-arm\venv\Lib\site-packages\libusb\_platform\windows\x86_64\libusb-1.0.dll"
+ctypes.CDLL(dll_path)
+import usb.backend.libusb1
+usb.backend.libusb1.get_backend(find_library=lambda x: dll_path)
+
+from pyAgxArm import create_agx_arm_config, AgxArmFactory, ArmModel
+
+cfg = create_agx_arm_config(
+    robot=ArmModel.PIPER,
+    interface="gs_usb",
+    channel=0,
+    bitrate=1000000,
+)
+robot = AgxArmFactory.create_arm(cfg)
+robot.connect()
+time.sleep(0.5)
+
+# ── Enable sequence ──────────────────────────────────────────
+robot.reset()
+time.sleep(1.5)
+
+robot.set_motion_mode('j')
+time.sleep(0.5)
+
+print("Enabling arm...")
+for _ in range(200):
+    if robot.enable():
+        break
+    time.sleep(0.05)
+time.sleep(0.5)
+status = None
+for _ in range(50):
+    status = robot.get_arm_status()
+    if status is not None:
+        break
+    time.sleep(0.1)
+
+if status:
+    print("ctrl_mode:", status.msg.ctrl_mode)
+else:
+    print("Warning: arm status not available yet, continuing...")
+    
+robot.set_speed_percent(20)   # 20% — slow enough to be safe
+
+# ── Read current position ────────────────────────────────────
+ja = None
+for _ in range(50):
+    ja = robot.get_joint_angles()
+    if ja is not None:
+        break
+    time.sleep(0.05)
+
+cur = list(ja.msg)
+print("Start joints (rad):", [round(v, 3) for v in cur])
+
+# ── Piper joint layout ───────────────────────────────────────
+# J1 = base rotation (left/right swing)
+# J2 = shoulder up/down
+# J3 = elbow up/down
+# J4 = forearm roll
+# J5 = wrist pitch (front arm up/down)
+# J6 = wrist roll (end effector spin)
+
+def move_to(target, label, wait=4.0):
+    print(f"\n→ {label}")
+    print(f"  Target: {[round(v, 3) for v in target]}")
+    robot.move_j(target)
+    time.sleep(wait)
+    actual = robot.get_joint_angles()
+    if actual:
+        print(f"  Actual: {[round(v, 3) for v in actual.msg]}")
+
+def deg(d):
+    return math.radians(d)
+
+try:
+    # ── Step 1: Raise arm UP ─────────────────────────────────
+    # Lift shoulder (J2) and straighten elbow (J3)
+    up = cur.copy()
+    up[1] = deg(30)    # shoulder up 30°
+    up[2] = deg(-30)   # elbow up to extend arm upward
+    move_to(up, "UP — raise shoulder and elbow", wait=4.0)
+
+    # ── Step 2: Wrist 90° (front arm rotates forward) ────────
+    wrist_fwd = up.copy()
+    wrist_fwd[4] = deg(90)   # J5 wrist pitch 90°
+    move_to(wrist_fwd, "WRIST — rotate front arm 90°", wait=3.0)
+
+    # ── Step 3: Swing RIGHT 90° (base rotation) ──────────────
+    swing_right = wrist_fwd.copy()
+    swing_right[0] = deg(90)   # J1 base +90° to the right
+    move_to(swing_right, "SWING RIGHT 90°", wait=4.0)
+
+    # ── Step 4: Swing LEFT 180° (through centre to left) ─────
+    swing_left = swing_right.copy()
+    swing_left[0] = deg(-90)   # J1 base -90° to the left
+    move_to(swing_left, "SWING LEFT 180° (through centre)", wait=6.0)
+
+    # ── Step 5: Return to centre ──────────────────────────────
+    centre = swing_left.copy()
+    centre[0] = deg(0)
+    move_to(centre, "RETURN TO CENTRE", wait=4.0)
+
+    print("\n✓ Sequence complete.")
+
+except KeyboardInterrupt:
+    print("\nStopped by user — disabling")
+
+finally:
+    robot.disable()
+    robot.disconnect()
+    print("Disabled and disconnected.")
